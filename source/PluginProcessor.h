@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "juce_dsp/juce_dsp.h"
 
 #if (MSVC)
 #include "ipps.h"
@@ -38,6 +39,29 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    juce::AudioProcessorValueTreeState apvts {
+        *this,
+        nullptr,
+        "Parameters",
+        createParameterLayout()
+    };
+
+    float convertNoteToHz();
+    void updateChorusParams();
+
+    bool notes = true;
+
 private:
+    juce::dsp::Chorus<float> chorusDSPObj;
+
+    juce::StringArray notesList;
+
+    juce::AudioPlayHead::CurrentPositionInfo cpi;
+
+    juce::SmoothedValue<float> delayValue;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
+
 };

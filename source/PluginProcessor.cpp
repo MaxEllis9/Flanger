@@ -12,6 +12,28 @@ PluginProcessor::PluginProcessor()
                      #endif
                        )
 {
+    notesList.add("8");
+    notesList.add("6");
+    notesList.add("4");
+    notesList.add("3");
+    notesList.add("2");
+    notesList.add("1.5");
+    notesList.add("1");
+    notesList.add("3/4");
+    notesList.add("1/2");
+    notesList.add("3/8");
+    notesList.add("1/3");
+    notesList.add("5/16");
+    notesList.add("1/4");
+    notesList.add("3/16");
+    notesList.add("1/6");
+    notesList.add("1/8");
+    notesList.add("1/12");
+    notesList.add("1/16");
+    notesList.add("1/24");
+    notesList.add("1/32");
+    notesList.add("1/48");
+    notesList.add("1/64");
 }
 
 PluginProcessor::~PluginProcessor()
@@ -86,9 +108,14 @@ void PluginProcessor::changeProgramName (int index, const juce::String& newName)
 //==============================================================================
 void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-    juce::ignoreUnused (sampleRate, samplesPerBlock);
+    juce::dsp::ProcessSpec spec;
+    spec.maximumBlockSize = (juce::uint32) samplesPerBlock;
+    spec.numChannels = (juce::uint32) getTotalNumInputChannels();
+    spec.sampleRate = sampleRate;
+
+    delayValue.reset(sampleRate, 0.01);
+
+    chorusDSPObj.prepare(spec);
 }
 
 void PluginProcessor::releaseResources()
@@ -145,10 +172,16 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // interleaved by keeping the same state.
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        juce::ignoreUnused (channelData);
-        // ..do something to the data...
+
     }
+    delayValue.setTargetValue(*apvts.getRawParameterValue("delay"));
+
+    updateChorusParams();
+
+    auto block = juce::dsp::AudioBlock<float>(buffer);
+    auto context = juce::dsp::ProcessContextReplacing<float>(block);
+
+    chorusDSPObj.process(context);
 }
 
 //==============================================================================
@@ -160,6 +193,7 @@ bool PluginProcessor::hasEditor() const
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
 {
     return new PluginEditor (*this);
+//    return new juce::GenericAudioProcessorEditor(*this);
 }
 
 //==============================================================================
@@ -184,3 +218,174 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new PluginProcessor();
 }
+
+juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParameterLayout()
+{
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+
+    juce::StringArray notes;
+    notes.add("8");
+    notes.add("6");
+    notes.add("4");
+    notes.add("3");
+    notes.add("2");
+    notes.add("1.5");
+    notes.add("1");
+    notes.add("3/4");
+    notes.add("1/2");
+    notes.add("3/8");
+    notes.add("1/3");
+    notes.add("5/16");
+    notes.add("1/4");
+    notes.add("3/16");
+    notes.add("1/6");
+    notes.add("1/8");
+    notes.add("1/12");
+    notes.add("1/16");
+    notes.add("1/24");
+    notes.add("1/32");
+    notes.add("1/48");
+    notes.add("1/64");
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>((juce::ParameterID{"delay", 1}),
+        "delay",
+        juce::NormalisableRange<float>(1.f, 20.f, 0.01f, 1.f),
+            1.f));
+//    Sets the centre delay in milliseconds of the chorus delay line modulation. must be between 1 and 100 ms.
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>((juce::ParameterID{"depth", 1}),
+        "depth",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+        0.f));
+//    Sets the volume of the LFO modulating the chorus delay line (between 0 and 1).
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>((juce::ParameterID{"feedback", 1}),
+        "feedback",
+        juce::NormalisableRange<float>(-1.f, 1.f, 0.01f, 1.f),
+        0.f));
+//    Sets the feedback volume (between -1 and 1) of the chorus delay line.
+    //    Negative values can be used to get specific chorus sounds.
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>((juce::ParameterID{"rate", 1}),
+        "rate",
+        juce::NormalisableRange<float>(0.01f, 40.f, 0.01f, 1.f),
+        0.f));
+//    rate in Hz <100
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>((juce::ParameterID{"mix", 1}),
+        "mix",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+        0.5f));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>((juce::ParameterID{"rateNotes", 1}),
+            "rateNotes",
+            notes,
+            6));
+
+    layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID("noteRateButton", 1), "noteRateButton", true));
+    layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID("hzRateButton", 1), "hzRateButton",  false));
+
+    return layout;
+}
+
+void PluginProcessor::updateChorusParams()
+{
+    chorusDSPObj.setCentreDelay(delayValue.getNextValue());
+    chorusDSPObj.setDepth(*apvts.getRawParameterValue("depth"));
+    chorusDSPObj.setFeedback(*apvts.getRawParameterValue("feedback"));
+    chorusDSPObj.setMix(*apvts.getRawParameterValue("mix"));
+    if(notes)
+    {
+        chorusDSPObj.setRate (convertNoteToHz());
+    }
+    else
+    {
+        chorusDSPObj.setRate (*apvts.getRawParameterValue ("rate"));
+    }
+
+}
+
+float PluginProcessor::convertNoteToHz()
+{
+    float oneCyclePerBeatInHz = 0;
+    if(cpi.bpm > 0)
+    {
+        oneCyclePerBeatInHz = 60.f/ (float)cpi.bpm;
+    }
+
+    float noteValue = 0;
+
+    switch (static_cast<int> (*apvts.getRawParameterValue("rateNotes")))
+    {
+        case 0:
+            noteValue = 8.f;
+            break;
+        case 1:
+            noteValue = 6.f;
+            break;
+        case 2:
+            noteValue = 4.f;
+            break;
+        case 3:
+            noteValue = 3.f;
+            break;
+        case 4:
+            noteValue = 2.f;
+            break;
+        case 5:
+            noteValue = 1.5f;
+            break;
+        case 6:
+            noteValue = 1.f;
+            break;
+        case 7:
+            noteValue = 3.f/4.f;
+            break;
+        case 8:
+            noteValue = 0.5f;
+            break;
+        case 9:
+            noteValue = 3.f/8.f;
+            break;
+        case 10:
+            noteValue = 1.f/3.f;
+            break;
+        case 11:
+            noteValue = 5.f/16.f;
+            break;
+        case 12:
+            noteValue = 0.25f;
+            break;
+        case 13:
+            noteValue = 3.f/16.f;
+            break;
+        case 14:
+            noteValue = 1.f/6.f;
+            break;
+        case 15:
+            noteValue = 1.f/8.f;
+            break;
+        case 16:
+            noteValue = 1.f/12.f;
+            break;
+        case 17:
+            noteValue = 1.f/16.f;
+            break;
+        case 18:
+            noteValue = 1.f/24.f;
+            break;
+        case 19:
+            noteValue = 1.f/32.f;
+            break;
+        case 20:
+            noteValue = 1.f/48.f;
+            break;
+        case 21:
+            noteValue = 1.f/64.f;
+            break;
+    }
+
+    return oneCyclePerBeatInHz/noteValue;
+}
+
+
